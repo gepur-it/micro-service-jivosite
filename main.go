@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
+	"github.com/streadway/amqp"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -14,20 +17,32 @@ import (
 	"time"
 )
 
-type RmoState struct {
-	AvailableForCalls bool `json:"available_for_calls"`
-}
-
-type ResultRequestResult struct {
-}
+//Responses
 
 type JivoResponse struct {
 	ID int `json:"id"`
 }
 
+type SuccessLoginResponse struct {
+	EndpointList struct {
+		Chatserver string `json:"chatserver"`
+	} `json:"endpoint_list"`
+	AccessToken string `json:"access_token"`
+	Ok          bool   `json:"ok"`
+}
+
+//Requests
+
+type ResultRequestResult struct {
+}
+
 type ResultRequest struct {
 	ID     int                 `json:"id"`
 	Result ResultRequestResult `json:"result"`
+}
+
+type RmoState struct {
+	AvailableForCalls bool `json:"available_for_calls"`
 }
 
 type SocketAuthRequestParams struct {
@@ -63,14 +78,6 @@ type SocketRegisterRequest struct {
 	Jsonrpc string                      `json:"jsonrpc"`
 }
 
-type SuccessLoginResponse struct {
-	EndpointList struct {
-		Chatserver string `json:"chatserver"`
-	} `json:"endpoint_list"`
-	AccessToken string `json:"access_token"`
-	Ok          bool   `json:"ok"`
-}
-
 type CannedPhrasesParams struct {
 	Name       string      `json:"name"`
 	GetPhrases int         `json:"get_phrases"`
@@ -84,7 +91,20 @@ type CannedPhrases struct {
 	Jsonrpc string              `json:"jsonrpc"`
 }
 
-func main() {
+var AMQPConnection *amqp.Connection
+var AMQPChannel *amqp.Channel
+var logger = logrus.New()
+
+func failOnError(err error, msg string) {
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err,
+		}).Fatal(msg)
+		panic(fmt.Sprintf("%s: %s", msg, err))
+	}
+}
+
+func process() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
@@ -331,4 +351,155 @@ func main() {
 			return
 		}
 	}
+}
+
+type Status struct {
+	IsOnline bool `json:"isOnline"`
+}
+
+type Manager struct {
+	Id    string `json:"id"`
+	Login string `json:"login"`
+	Pass  string `json:"pass"`
+}
+
+type ManagerStatus struct {
+	Manager *Manager `json:"manager"`
+	Status  Status   `json:"status"`
+}
+
+type Server struct {
+	managers map[string]*Manager
+	online   chan *Manager
+	offline  chan *Manager
+}
+
+func server() *Server {
+	return &Server{
+		online:   make(chan *Manager),
+		offline:  make(chan *Manager),
+		managers: make(map[string]*Manager),
+	}
+}
+
+func init() {
+	logger.WithFields(logrus.Fields{}).Info("Server init:")
+	err := godotenv.Load()
+	if err != nil {
+		panic(fmt.Sprintf("%s: %s", "Error loading .env file", err))
+	}
+
+	logger.SetLevel(logrus.DebugLevel)
+	logger.SetOutput(os.Stdout)
+	logger.SetFormatter(&logrus.TextFormatter{})
+
+	cs := fmt.Sprintf("amqp://%s:%s@%s:%s/%s",
+		os.Getenv("RABBITMQ_ERP_LOGIN"),
+		os.Getenv("RABBITMQ_ERP_PASS"),
+		os.Getenv("RABBITMQ_ERP_HOST"),
+		os.Getenv("RABBITMQ_ERP_PORT"),
+		os.Getenv("RABBITMQ_ERP_VHOST"))
+
+	connection, err := amqp.Dial(cs)
+	failOnError(err, "Failed to connect to RabbitMQ")
+	AMQPConnection = connection
+
+	channel, err := AMQPConnection.Channel()
+
+	failOnError(err, "Failed to open a channel")
+	AMQPChannel = channel
+
+	failOnError(err, "Failed to declare a queue")
+}
+
+func (server *Server) query() {
+	logger.WithFields(logrus.Fields{}).Info("Server start query:")
+
+	query, err := AMQPChannel.QueueDeclare(
+		"erp_manager_status",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+
+	failOnError(err, "Failed to declare a queue")
+
+	msgs, err := AMQPChannel.Consume(
+		query.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to register a consumer")
+
+	forever := make(chan bool)
+
+	go func() {
+		for d := range msgs {
+			managerStatus := &ManagerStatus{}
+
+			err := json.Unmarshal(d.Body, &managerStatus)
+			failOnError(err, "Can`t decode query callBack")
+
+			manager := managerStatus.Manager
+
+			if managerStatus.Status.IsOnline == true {
+				server.online <- manager
+			} else {
+				server.offline <- manager
+			}
+		}
+	}()
+
+	<-forever
+}
+
+func (server *Server) start() {
+	for {
+		select {
+		case manager := <-server.online:
+			if _, ok := server.managers[manager.Id]; ok {
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+				}).Warn("Manager already online:")
+			} else {
+				server.managers[manager.Id] = manager
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+				}).Info("Manager is online:")
+			}
+
+		case manager := <-server.offline:
+
+			if _, ok := server.managers[manager.Id]; ok {
+				delete(server.managers, manager.Id)
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+				}).Info("Manager is offline:")
+			} else {
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+				}).Warn("Manager already offline:")
+			}
+		}
+	}
+}
+
+func main() {
+	logger.WithFields(logrus.Fields{}).Info("Server start:")
+
+	server := server()
+
+	go server.start()
+	server.query()
+
+	//defer AMQPConnection.Close()
+	//defer AMQPChannel.Close()
+
+	//process()
 }
