@@ -194,11 +194,6 @@ func process() {
 
 	data := url.Values{}
 
-	data.Set("login", "zogxray@gmail.com")
-	data.Add("password", "~%_(c[,y;@NB/6wW")
-	//data.Set("login", "qwe2@qwe.qwe")
-	//data.Add("password", "nTj4*6F#9")
-
 	req, err := http.NewRequest("POST", loginApiUrl, strings.NewReader(data.Encode()))
 
 	req.Header.Set("Host", "api.jivosite.com")
