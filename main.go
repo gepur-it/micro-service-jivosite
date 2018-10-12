@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
@@ -104,7 +105,8 @@ func failOnError(err error, msg string) {
 	}
 }
 
-func getApiKey(login string, pass string) SuccessLoginResponse {
+func getApiKey(login string, pass string) (*SuccessLoginResponse, error) {
+	var err error
 
 	successLoginResponse := SuccessLoginResponse{}
 
@@ -118,6 +120,10 @@ func getApiKey(login string, pass string) SuccessLoginResponse {
 
 	req, err := http.NewRequest("POST", loginApiUrl, strings.NewReader(data.Encode()))
 
+	if err != nil {
+		return nil, err
+	}
+
 	req.Header.Set("Host", "api.jivosite.com")
 	req.Header.Set("Origin", "https://app.jivosite.com")
 	req.Header.Set("Referer", "https://app.jivosite.com")
@@ -127,7 +133,7 @@ func getApiKey(login string, pass string) SuccessLoginResponse {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	defer resp.Body.Close()
@@ -137,11 +143,12 @@ func getApiKey(login string, pass string) SuccessLoginResponse {
 	err = json.Unmarshal(responseBody, &successLoginResponse)
 
 	if err != nil {
-		log.Fatal("Can`t decode login response")
+		return nil, err
 	}
 
 	if successLoginResponse.Ok == false {
-		log.Fatal("Login data incorrect")
+		err := errors.New("login request failed")
+		return nil, err
 	}
 
 	fmt.Println("response Body:", string(responseBody))
@@ -154,6 +161,10 @@ func getApiKey(login string, pass string) SuccessLoginResponse {
 
 	req, err = http.NewRequest("POST", refreshApiUrl, strings.NewReader(data.Encode()))
 
+	if err != nil {
+		return nil, err
+	}
+
 	req.Header.Set("Host", "api.jivosite.com")
 	req.Header.Set("Origin", "https://app.jivosite.com")
 	req.Header.Set("Referer", "https://app.jivosite.com")
@@ -163,7 +174,7 @@ func getApiKey(login string, pass string) SuccessLoginResponse {
 	resp, err = client.Do(req)
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	defer resp.Body.Close()
@@ -175,14 +186,15 @@ func getApiKey(login string, pass string) SuccessLoginResponse {
 	err = json.Unmarshal(responseBody, &successLoginResponse)
 
 	if err != nil {
-		log.Fatal("Can`t decode login response")
+		return nil, err
 	}
 
 	if successLoginResponse.Ok == false {
-		log.Fatal("Login data incorrect")
+		err := errors.New("login request failed")
+		return nil, err
 	}
 
-	return successLoginResponse
+	return &successLoginResponse, err
 }
 
 func process() {
@@ -545,9 +557,18 @@ func (server *Server) start() {
 					"manager": manager.Id,
 				}).Warn("Manager already online:")
 			} else {
-				response := getApiKey(manager.Login, manager.Pass)
-				manager.SuccessLoginResponse = &response
+				response, err := getApiKey(manager.Login, manager.Pass)
 
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"manager": manager.Id,
+						"err":     err,
+					}).Error("Manager can`t register:")
+
+					return
+				}
+
+				manager.SuccessLoginResponse = response
 				server.managers[manager.Id] = manager
 				logger.WithFields(logrus.Fields{
 					"manager": manager.Id,
