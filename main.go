@@ -104,6 +104,87 @@ func failOnError(err error, msg string) {
 	}
 }
 
+func getApiKey(login string, pass string) SuccessLoginResponse {
+
+	successLoginResponse := SuccessLoginResponse{}
+
+	loginApiUrl := "https://api.jivosite.com/api/1.0/auth/agent/access"
+	fmt.Println("URL:>", loginApiUrl)
+
+	data := url.Values{}
+
+	data.Set("login", login)
+	data.Add("password", pass)
+
+	req, err := http.NewRequest("POST", loginApiUrl, strings.NewReader(data.Encode()))
+
+	req.Header.Set("Host", "api.jivosite.com")
+	req.Header.Set("Origin", "https://app.jivosite.com")
+	req.Header.Set("Referer", "https://app.jivosite.com")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+
+	if err != nil {
+		panic(err)
+	}
+
+	defer resp.Body.Close()
+
+	responseBody, _ := ioutil.ReadAll(resp.Body)
+
+	err = json.Unmarshal(responseBody, &successLoginResponse)
+
+	if err != nil {
+		log.Fatal("Can`t decode login response")
+	}
+
+	if successLoginResponse.Ok == false {
+		log.Fatal("Login data incorrect")
+	}
+
+	fmt.Println("response Body:", string(responseBody))
+
+	refreshApiUrl := "https://api.jivosite.com/api/1.0/auth/access/refresh"
+	fmt.Println("URL:>", refreshApiUrl)
+
+	data = url.Values{}
+	data.Set("token", successLoginResponse.AccessToken)
+
+	req, err = http.NewRequest("POST", refreshApiUrl, strings.NewReader(data.Encode()))
+
+	req.Header.Set("Host", "api.jivosite.com")
+	req.Header.Set("Origin", "https://app.jivosite.com")
+	req.Header.Set("Referer", "https://app.jivosite.com")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+
+	client = &http.Client{}
+	resp, err = client.Do(req)
+
+	if err != nil {
+		panic(err)
+	}
+
+	defer resp.Body.Close()
+
+	responseBody, _ = ioutil.ReadAll(resp.Body)
+
+	successLoginResponse = SuccessLoginResponse{}
+
+	err = json.Unmarshal(responseBody, &successLoginResponse)
+
+	if err != nil {
+		log.Fatal("Can`t decode login response")
+	}
+
+	if successLoginResponse.Ok == false {
+		log.Fatal("Login data incorrect")
+	}
+
+	return successLoginResponse
+}
+
 func process() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
@@ -358,9 +439,10 @@ type Status struct {
 }
 
 type Manager struct {
-	Id    string `json:"id"`
-	Login string `json:"login"`
-	Pass  string `json:"pass"`
+	Id                   string `json:"id"`
+	Login                string `json:"login"`
+	Pass                 string `json:"pass"`
+	SuccessLoginResponse *SuccessLoginResponse
 }
 
 type ManagerStatus struct {
@@ -468,6 +550,9 @@ func (server *Server) start() {
 					"manager": manager.Id,
 				}).Warn("Manager already online:")
 			} else {
+				response := getApiKey(manager.Login, manager.Pass)
+				manager.SuccessLoginResponse = &response
+
 				server.managers[manager.Id] = manager
 				logger.WithFields(logrus.Fields{
 					"manager": manager.Id,
