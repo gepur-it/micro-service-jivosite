@@ -18,7 +18,7 @@ type SuccessLoginResponse struct {
 	Ok          bool   `json:"ok"`
 }
 
-func getApiKey(login string, pass string) (*SuccessLoginResponse, error) {
+func getApiKey(login *string, pass *string) (*SuccessLoginResponse, error) {
 	var err error
 
 	successLoginResponse := SuccessLoginResponse{}
@@ -28,8 +28,8 @@ func getApiKey(login string, pass string) (*SuccessLoginResponse, error) {
 
 	data := url.Values{}
 
-	data.Set("login", login)
-	data.Add("password", pass)
+	data.Set("login", *login)
+	data.Add("password", *pass)
 
 	req, err := http.NewRequest("POST", loginApiUrl, strings.NewReader(data.Encode()))
 

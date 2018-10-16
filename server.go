@@ -65,6 +65,7 @@ func (server *Server) managerQuery() {
 				}).Error("Can`t decode manager query callBack:")
 			}
 
+			managerStatus.Manager.requests = 0
 			manager := managerStatus.Manager
 
 			if managerStatus.Status.IsOnline == true {
@@ -135,13 +136,35 @@ func (server *Server) start() {
 				}).Warn("Manager already online:")
 
 			} else {
-				response, err := getApiKey(manager.Login, manager.Pass)
+				login, password, err := getCredentials(manager.Id)
+
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"manager": manager.Id,
+						"err":     err,
+					}).Error("Manager can`t get credentials from MySQL:")
+
+					return
+				}
+
+				response, err := getApiKey(login, password)
 
 				if err != nil {
 					logger.WithFields(logrus.Fields{
 						"manager": manager.Id,
 						"err":     err,
 					}).Error("Manager can`t register:")
+
+					return
+				}
+
+				err = setStatus(manager.Id, true)
+
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"manager": manager.Id,
+						"err":     err,
+					}).Error("Manager can`t update status:")
 
 					return
 				}
@@ -154,7 +177,7 @@ func (server *Server) start() {
 				manager.auth()
 
 				go manager.ticker()
-				go manager.reader()
+				go manager.reader(server)
 
 				logger.WithFields(logrus.Fields{
 					"manager": manager.Id,
@@ -164,6 +187,17 @@ func (server *Server) start() {
 		case manager := <-server.offline:
 
 			if _, ok := server.managers[manager.Id]; ok {
+
+				err := setStatus(manager.Id, false)
+
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"manager": manager.Id,
+						"err":     err,
+					}).Error("Manager can`t update status:")
+
+					return
+				}
 
 				server.managers[manager.Id].connection.Close()
 				delete(server.managers, manager.Id)

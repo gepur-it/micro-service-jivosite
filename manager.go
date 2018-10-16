@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-type JivoResponse struct {
-	ID int `json:"id"`
-}
-
 type ResultRequestResult struct {
 }
 
@@ -79,10 +75,9 @@ type Status struct {
 
 type Manager struct {
 	Id                   string `json:"id"`
-	Login                string `json:"login"`
-	Pass                 string `json:"pass"`
 	SuccessLoginResponse *SuccessLoginResponse
 	connection           *websocket.Conn
+	requests             int
 }
 
 type ManagerStatus struct {
@@ -94,7 +89,8 @@ func (manager *Manager) subscribe() {
 	time.Sleep(time.Second * 1)
 
 	socketRegisterRequestParams := SocketRegisterRequestParams{"handle", "batch", nil}
-	socketRegisterRequest := SocketRegisterRequest{1, "subscribe", socketRegisterRequestParams, "2.0"}
+	manager.requests = manager.requests + 1
+	socketRegisterRequest := SocketRegisterRequest{manager.requests, "subscribe", socketRegisterRequestParams, "2.0"}
 
 	b, err := json.Marshal(socketRegisterRequest)
 
@@ -131,7 +127,8 @@ func (manager *Manager) auth() {
 			manager.SuccessLoginResponse.AccessToken,
 		}
 
-		socketAuthRequest := SocketAuthRequest{2, "cometan", socketAuthRequestParams, "2.0"}
+		manager.requests = manager.requests + 1
+		socketAuthRequest := SocketAuthRequest{manager.requests, "cometan", socketAuthRequestParams, "2.0"}
 
 		b, err := json.Marshal(socketAuthRequest)
 
@@ -153,7 +150,8 @@ func (manager *Manager) getCannedPhrases() {
 
 	cannedPhrasesParams := CannedPhrasesParams{"canned_phrases", 1, nil}
 
-	cannedPhrases := CannedPhrases{3, "cometan", cannedPhrasesParams, "2.0"}
+	manager.requests = manager.requests + 1
+	cannedPhrases := CannedPhrases{manager.requests, "cometan", cannedPhrasesParams, "2.0"}
 
 	b, err := json.Marshal(cannedPhrases)
 
@@ -183,40 +181,83 @@ func (manager *Manager) connectToSocket() {
 	manager.connection = chatSocketConnection
 }
 
-func (manager *Manager) reader() {
-	defer close(done)
+type ServerMessage struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params struct {
+		Name string `json:"name"`
+	} `json:"params"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
+type ServerMessageLogout struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params struct {
+		Name string `json:"name"`
+	} `json:"params"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
+func (manager *Manager) reader(server *Server) {
+	quit := make(chan bool)
 	for {
-		_, message, err := manager.connection.ReadMessage()
-
-		if err != nil {
-			log.Println("read:", err)
+		select {
+		case <-quit:
 			return
-		}
-
-		log.Printf("recv: %s", message)
-
-		if string(message) != "." {
-			jivoResponse := JivoResponse{}
-
-			err = json.Unmarshal(message, &jivoResponse)
+		default:
+			_, message, err := manager.connection.ReadMessage()
 
 			if err != nil {
-				log.Fatal("Can`t decode response from socket:", err)
+				logger.WithFields(logrus.Fields{
+					"error": err,
+				}).Fatal("Socket reader failed:")
 			}
 
-			resultRequest := ResultRequest{jivoResponse.ID, ResultRequestResult{}}
+			logger.Info("Recv pong:")
 
-			err = manager.connection.WriteJSON(resultRequest)
+			if string(message) != "." {
+				serverMessage := ServerMessage{}
 
-			if err != nil {
-				log.Fatal("Can`t write auth request to socket:", err)
+				err = json.Unmarshal(message, &serverMessage)
+
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"error": err,
+					}).Error("Can`t decode response from socket:")
+				}
+
+				if serverMessage.Method == "handle" {
+					if serverMessage.Params.Name == "login_another_dev" {
+
+						server.offline <- manager
+
+						logger.WithFields(logrus.Fields{
+							"message": serverMessage,
+						}).Error("Login from another dev:")
+
+						quit <- true
+					}
+				}
+
+				manager.requests = manager.requests + 1
+				resultRequest := ResultRequest{serverMessage.ID, ResultRequestResult{}}
+
+				err = manager.connection.WriteJSON(resultRequest)
+
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"error": err,
+					}).Error("Can`t write result request to socket:")
+				}
+
+				logger.WithFields(logrus.Fields{
+					"body": resultRequest,
+				}).Info("Send Body:")
 			}
-
-			b, _ := json.Marshal(resultRequest)
-
-			fmt.Println("\nSend Body:", string(b), "\n")
 		}
 	}
+	quit <- true
 }
 
 func (manager *Manager) ticker() {
@@ -229,7 +270,8 @@ func (manager *Manager) ticker() {
 			return
 		case t := <-ticker.C:
 			err := manager.connection.WriteMessage(websocket.TextMessage, []byte("."))
-			log.Println("ping: .")
+			logger.Info("Send ping:")
+
 			if err != nil {
 				log.Println("write:", err, t)
 
