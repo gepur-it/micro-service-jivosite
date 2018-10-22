@@ -29,19 +29,8 @@ func server() *Server {
 func (server *Server) managerQuery() {
 	logger.WithFields(logrus.Fields{}).Info("Server start manager query:")
 
-	query, err := AMQPChannel.QueueDeclare(
-		"erp_chat_manager_status",
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-
-	failOnError(err, "Failed to declare a queue")
-
 	msgs, err := AMQPChannel.Consume(
-		query.Name,
+		"erp_chat_manager_status",
 		"",
 		true,
 		false,
@@ -82,19 +71,8 @@ func (server *Server) managerQuery() {
 func (server *Server) commandQuery() {
 	logger.WithFields(logrus.Fields{}).Info("Server start command query:")
 
-	query, err := AMQPChannel.QueueDeclare(
-		"erp_chat_manager_command",
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-
-	failOnError(err, "Failed to declare a queue")
-
 	msgs, err := AMQPChannel.Consume(
-		query.Name,
+		"erp_chat_manager_command",
 		"",
 		true,
 		false,

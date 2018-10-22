@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
@@ -14,6 +15,7 @@ var AMQPChannel *amqp.Channel
 var logger = logrus.New()
 var interrupt = make(chan *Manager)
 var done chan struct{}
+var MySQL *sql.DB
 
 func failOnError(err error, msg string) {
 	if err != nil {
@@ -52,6 +54,19 @@ func init() {
 	AMQPChannel = channel
 
 	failOnError(err, "Failed to declare a queue")
+
+	db, err := sql.Open("mysql", fmt.Sprintf(
+		"%s:%s@tcp(%s:%s)/%s",
+		os.Getenv("MYSQL_DATABASE_USER"),
+		os.Getenv("MYSQL_DATABASE_PASSWORD"),
+		os.Getenv("MYSQL_DATABASE_HOST"),
+		os.Getenv("MYSQL_DATABASE_PORT"),
+		os.Getenv("MYSQL_DATABASE_DB"),
+	))
+
+	MySQL = db
+
+	failOnError(err, "Failed to connect MySQL")
 }
 
 func main() {
@@ -67,6 +82,7 @@ func main() {
 	go server.commandQuery()
 	server.managerQuery()
 
+	defer MySQL.Close()
 	defer AMQPConnection.Close()
 	defer AMQPChannel.Close()
 }

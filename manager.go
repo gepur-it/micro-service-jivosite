@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
+	"github.com/streadway/amqp"
 	"log"
 	"net/http"
 	"net/url"
@@ -208,6 +209,10 @@ func (manager *Manager) reader(server *Server) {
 		default:
 			_, message, err := manager.connection.ReadMessage()
 
+			logger.WithFields(logrus.Fields{
+				"message": string(message),
+			}).Info("New message from server:")
+
 			if err != nil {
 				logger.WithFields(logrus.Fields{
 					"error": err,
@@ -237,6 +242,44 @@ func (manager *Manager) reader(server *Server) {
 						}).Error("Login from another dev:")
 
 						quit <- true
+
+					} else if serverMessage.Params.Name == "login_ok" {
+						//@todo not nice now
+					} else {
+						name := fmt.Sprintf("chat_to_erp_handle_messages")
+
+						query, err := AMQPChannel.QueueDeclare(
+							name,
+							true,
+							false,
+							false,
+							false,
+							nil,
+						)
+
+						if err != nil {
+							logger.WithFields(logrus.Fields{
+								"error": err,
+							}).Error("Failed to declare a queue:")
+						}
+
+						err = AMQPChannel.Publish(
+							"",
+							query.Name,
+							false,
+							false,
+							amqp.Publishing{
+								DeliveryMode: amqp.Transient,
+								ContentType:  "application/json",
+								Body:         message,
+								Timestamp:    time.Now(),
+							})
+
+						if err != nil {
+							logger.WithFields(logrus.Fields{
+								"error": err,
+							}).Error("Failed to declare a queue:")
+						}
 					}
 				}
 
