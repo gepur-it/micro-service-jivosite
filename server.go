@@ -2,19 +2,17 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/sirupsen/logrus"
+	"math"
+	"math/rand"
 )
-
-type Command struct {
-	Manager Manager                `json:"manager"`
-	Data    map[string]interface{} `json:"data"`
-}
 
 type Server struct {
 	managers map[string]*Manager
 	online   chan *Manager
 	offline  chan *Manager
-	command  chan *Command
+	command  chan []byte
 }
 
 func server() *Server {
@@ -22,7 +20,7 @@ func server() *Server {
 		online:   make(chan *Manager),
 		offline:  make(chan *Manager),
 		managers: make(map[string]*Manager),
-		command:  make(chan *Command),
+		command:  make(chan []byte),
 	}
 }
 
@@ -86,17 +84,7 @@ func (server *Server) commandQuery() {
 
 	go func() {
 		for d := range msgs {
-			command := &Command{}
-
-			err := json.Unmarshal(d.Body, &command)
-
-			if err != nil {
-				logger.WithFields(logrus.Fields{
-					"error": err,
-				}).Error("Can`t decode  command callBack:")
-			}
-
-			server.command <- command
+			server.command <- d.Body
 		}
 	}()
 
@@ -191,19 +179,110 @@ func (server *Server) start() {
 			}
 
 		case command := <-server.command:
-			if _, ok := server.managers[command.Manager.Id]; ok {
+			whatCommand := WhatCommand{}
+
+			err := json.Unmarshal(command, &whatCommand)
+
+			if err != nil {
+				logger.WithFields(logrus.Fields{
+					"manager": whatCommand.ManagerId,
+					"command": whatCommand.Params.Name,
+				}).Error("Server can`t decode command:")
+			}
+
+			if _, ok := server.managers[whatCommand.ManagerId]; ok {
+				manager := server.managers[whatCommand.ManagerId]
+				if whatCommand.Params.Name == "accept" {
+					commandToSend := AcceptCommand{}
+
+					err := json.Unmarshal(command, &commandToSend)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+						}).Error("Server can`t decode command:")
+					}
+
+					manager.requests = manager.requests + 1
+					commandToSend.ID = manager.requests
+					commandToSend.Method = "cometan"
+					commandToSend.Jsonrpc = "2.0"
+					manager.connection.WriteJSON(commandToSend)
+
+				}
+
+				if whatCommand.Params.Name == "agent_message" {
+					commandToSend := AgentMessageCommand{}
+					err := json.Unmarshal(command, &commandToSend)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+						}).Error("Server can`t decode command:")
+					}
+
+					manager.requests = manager.requests + 1
+					commandToSend.ID = manager.requests
+					commandToSend.Method = "cometan"
+					commandToSend.Jsonrpc = "2.0"
+					commandToSend.Params.PrivateID = awesomeCryptFromJivoSite()
+					manager.connection.WriteJSON(commandToSend)
+				}
 
 				logger.WithFields(logrus.Fields{
-					"manager": command.Manager.Id,
-					"command": command,
-				}).Info("Server receive command:")
-
+					"manager": whatCommand.ManagerId,
+					"command": whatCommand.Params.Name,
+				}).Info("Server send command to socket command:")
 			} else {
 				logger.WithFields(logrus.Fields{
-					"manager": command.Manager.Id,
-					"command": command,
+					"manager": whatCommand.ManagerId,
+					"command": whatCommand.Params.Name,
 				}).Warn("Server receive command from offline manager:")
 			}
 		}
 	}
+}
+
+func e() string {
+	return fmt.Sprintf("%x", int(math.Floor(65536*rand.Float64())))
+}
+
+func awesomeCryptFromJivoSite() string {
+	code := fmt.Sprintf("%s%s-%s-%s-%s-%s%s%s", e(), e(), e(), e(), e(), e(), e(), e())
+
+	return code
+}
+
+type WhatCommand struct {
+	ManagerId string `json:"managerId"`
+	Params    struct {
+		Name string `json:"name"`
+	} `json:"params"`
+}
+
+type AcceptCommand struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params struct {
+		Name     string `json:"name"`
+		ChatID   int    `json:"chat_id"`
+		ClientID int    `json:"client_id"`
+	} `json:"params"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
+type AgentMessageCommand struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params struct {
+		Name      string `json:"name"`
+		Message   string `json:"message"`
+		ChatID    int    `json:"chat_id"`
+		ClientID  int    `json:"client_id"`
+		IsQuick   int    `json:"is_quick"`
+		PrivateID string `json:"private_id"`
+	} `json:"params"`
+	Jsonrpc string `json:"jsonrpc"`
 }

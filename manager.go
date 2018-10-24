@@ -86,6 +86,24 @@ type ManagerStatus struct {
 	Status  Status   `json:"status"`
 }
 
+type ServerMessage struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params struct {
+		Name string `json:"name"`
+	} `json:"params"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
+type ServerMessageLogout struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params struct {
+		Name string `json:"name"`
+	} `json:"params"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
 func (manager *Manager) subscribe() {
 	time.Sleep(time.Second * 1)
 
@@ -182,24 +200,6 @@ func (manager *Manager) connectToSocket() {
 	manager.connection = chatSocketConnection
 }
 
-type ServerMessage struct {
-	ID     int    `json:"id"`
-	Method string `json:"method"`
-	Params struct {
-		Name string `json:"name"`
-	} `json:"params"`
-	Jsonrpc string `json:"jsonrpc"`
-}
-
-type ServerMessageLogout struct {
-	ID     int    `json:"id"`
-	Method string `json:"method"`
-	Params struct {
-		Name string `json:"name"`
-	} `json:"params"`
-	Jsonrpc string `json:"jsonrpc"`
-}
-
 func (manager *Manager) reader(server *Server) {
 	quit := make(chan bool)
 	for {
@@ -246,26 +246,9 @@ func (manager *Manager) reader(server *Server) {
 					} else if serverMessage.Params.Name == "login_ok" {
 						//@todo not nice now
 					} else {
-						name := fmt.Sprintf("chat_to_erp_handle_messages")
-
-						query, err := AMQPChannel.QueueDeclare(
-							name,
-							true,
-							false,
-							false,
-							false,
-							nil,
-						)
-
-						if err != nil {
-							logger.WithFields(logrus.Fields{
-								"error": err,
-							}).Error("Failed to declare a queue:")
-						}
-
 						err = AMQPChannel.Publish(
 							"",
-							query.Name,
+							"chat_to_erp_handle_messages",
 							false,
 							false,
 							amqp.Publishing{
