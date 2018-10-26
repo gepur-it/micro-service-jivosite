@@ -215,8 +215,6 @@ func (manager *Manager) reader(server *Server) {
 				}).Fatal("Socket reader failed:")
 			}
 
-			logger.WithField("manager", manager.Id).Info("Recv pong:")
-
 			if string(message) != "." {
 				logger.WithFields(logrus.Fields{
 					"message": string(message),
@@ -280,6 +278,8 @@ func (manager *Manager) reader(server *Server) {
 				logger.WithFields(logrus.Fields{
 					"body": resultRequest,
 				}).Info("Send Body:")
+			} else {
+				logger.WithField("manager", manager.Id).Info("Recv pong:")
 			}
 		}
 	}

@@ -9,10 +9,10 @@ type Credentials struct {
 	Password *string
 }
 
-func getCredentials(managerId string) (*string, *string, error) {
+func getCredentials(id string) (*string, *string, error) {
 	var err error
 	var c Credentials
-	err = MySQL.QueryRow("SELECT login, password FROM chat_jivosite_manager WHERE manager_id = ?", managerId).Scan(&c.Login, &c.Password)
+	err = MySQL.QueryRow("SELECT login, password FROM chat_jivosite_manager WHERE id = ?", id).Scan(&c.Login, &c.Password)
 
 	if err != nil {
 		return nil, nil, err
@@ -21,16 +21,16 @@ func getCredentials(managerId string) (*string, *string, error) {
 	return c.Login, c.Password, nil
 }
 
-func setStatus(managerId string, status bool) error {
+func setStatus(id string, status bool) error {
 	var err error
 
-	stmt, err := MySQL.Prepare("UPDATE chat_jivosite_manager set is_online=? where manager_id=?")
+	stmt, err := MySQL.Prepare("UPDATE chat_jivosite_manager set is_online=? where id=?")
 
 	if err != nil {
 		return err
 	}
 
-	stmt.Exec(status, managerId)
+	stmt.Exec(status, id)
 
 	return nil
 }
