@@ -2,10 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/sirupsen/logrus"
-	"math"
-	"math/rand"
 )
 
 type Server struct {
@@ -227,14 +224,13 @@ func (server *Server) start() {
 					commandToSend.ID = manager.requests
 					commandToSend.Method = "cometan"
 					commandToSend.Jsonrpc = "2.0"
-					commandToSend.Params.PrivateID = awesomeCryptFromJivoSite()
 					manager.connection.WriteJSON(commandToSend)
 				}
 
 				logger.WithFields(logrus.Fields{
 					"manager": whatCommand.ManagerId,
 					"command": whatCommand.Params.Name,
-				}).Info("Server send command to socket command:")
+				}).Info("Server send command to socket:")
 			} else {
 				logger.WithFields(logrus.Fields{
 					"manager": whatCommand.ManagerId,
@@ -243,16 +239,6 @@ func (server *Server) start() {
 			}
 		}
 	}
-}
-
-func e() string {
-	return fmt.Sprintf("%x", int(math.Floor(65536*rand.Float64())))
-}
-
-func awesomeCryptFromJivoSite() string {
-	code := fmt.Sprintf("%s%s-%s-%s-%s-%s%s%s", e(), e(), e(), e(), e(), e(), e(), e())
-
-	return code
 }
 
 type WhatCommand struct {

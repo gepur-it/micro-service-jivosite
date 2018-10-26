@@ -34,3 +34,17 @@ func setStatus(managerId string, status bool) error {
 
 	return nil
 }
+
+func selOfflineAll() error {
+	var err error
+
+	stmt, err := MySQL.Prepare("UPDATE chat_jivosite_manager set is_online=?")
+
+	if err != nil {
+		return err
+	}
+
+	stmt.Exec(false)
+
+	return nil
+}

@@ -7,8 +7,8 @@
 "managerId": "S-1-5-21-3028873204-4242369451-707807428-1159",
 "params":{
     "name":"accept",
-    "chat_id":44,
-    "client_id":23
+    "chat_id":52,
+    "client_id":31
     }
 }
 
@@ -18,8 +18,8 @@ attach
 "managerId": "S-1-5-21-3028873204-4242369451-707807428-1159",
 "params":{
     "name":"accept",
-    "chat_id":45,
-    "client_id":24
+    "chat_id":53,
+    "client_id":32
     }
 }
 
@@ -37,6 +37,7 @@ transfer -
 
     }
 }
+
 
 closeWithoutAnswer
 reject

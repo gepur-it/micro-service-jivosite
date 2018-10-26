@@ -209,19 +209,19 @@ func (manager *Manager) reader(server *Server) {
 		default:
 			_, message, err := manager.connection.ReadMessage()
 
-			logger.WithFields(logrus.Fields{
-				"message": string(message),
-			}).Info("New message from server:")
-
 			if err != nil {
 				logger.WithFields(logrus.Fields{
 					"error": err,
 				}).Fatal("Socket reader failed:")
 			}
 
-			logger.Info("Recv pong:")
+			logger.WithField("manager", manager.Id).Info("Recv pong:")
 
 			if string(message) != "." {
+				logger.WithFields(logrus.Fields{
+					"message": string(message),
+				}).Info("New message from server:")
+
 				serverMessage := ServerMessage{}
 
 				err = json.Unmarshal(message, &serverMessage)
@@ -296,7 +296,7 @@ func (manager *Manager) ticker() {
 			return
 		case t := <-ticker.C:
 			err := manager.connection.WriteMessage(websocket.TextMessage, []byte("."))
-			logger.Info("Send ping:")
+			logger.WithField("manager", manager.Id).Info("Send ping:")
 
 			if err != nil {
 				log.Println("write:", err, t)

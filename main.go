@@ -71,6 +71,19 @@ func init() {
 
 func main() {
 	logger.WithFields(logrus.Fields{}).Info("Server start:")
+
+	err := selOfflineAll()
+
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"err": err,
+		}).Error("Managers can`t set offline status:")
+
+		return
+	}
+
+	logger.Info("All manager set to offline:")
+
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
