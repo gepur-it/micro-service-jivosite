@@ -5,6 +5,38 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type WhatCommand struct {
+	ManagerId string `json:"managerId"`
+	Params    struct {
+		Name string `json:"name"`
+	} `json:"params"`
+}
+
+type AcceptCommand struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params struct {
+		Name     string `json:"name"`
+		ChatID   int    `json:"chat_id"`
+		ClientID int    `json:"client_id"`
+	} `json:"params"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
+type AgentMessageCommand struct {
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params struct {
+		Name      string `json:"name"`
+		Message   string `json:"message"`
+		ChatID    int    `json:"chat_id"`
+		ClientID  int    `json:"client_id"`
+		IsQuick   int    `json:"is_quick"`
+		PrivateID string `json:"private_id"`
+	} `json:"params"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
 type Server struct {
 	managers map[string]*Manager
 	online   chan *Manager
@@ -239,36 +271,4 @@ func (server *Server) start() {
 			}
 		}
 	}
-}
-
-type WhatCommand struct {
-	ManagerId string `json:"managerId"`
-	Params    struct {
-		Name string `json:"name"`
-	} `json:"params"`
-}
-
-type AcceptCommand struct {
-	ID     int    `json:"id"`
-	Method string `json:"method"`
-	Params struct {
-		Name     string `json:"name"`
-		ChatID   int    `json:"chat_id"`
-		ClientID int    `json:"client_id"`
-	} `json:"params"`
-	Jsonrpc string `json:"jsonrpc"`
-}
-
-type AgentMessageCommand struct {
-	ID     int    `json:"id"`
-	Method string `json:"method"`
-	Params struct {
-		Name      string `json:"name"`
-		Message   string `json:"message"`
-		ChatID    int    `json:"chat_id"`
-		ClientID  int    `json:"client_id"`
-		IsQuick   int    `json:"is_quick"`
-		PrivateID string `json:"private_id"`
-	} `json:"params"`
-	Jsonrpc string `json:"jsonrpc"`
 }
