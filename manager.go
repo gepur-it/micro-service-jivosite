@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+var quit = make(chan bool)
+
 type ResultRequestResult struct {
 }
 
@@ -201,7 +203,6 @@ func (manager *Manager) connectToSocket() {
 }
 
 func (manager *Manager) reader(server *Server) {
-	quit := make(chan bool)
 	for {
 		select {
 		case <-quit:

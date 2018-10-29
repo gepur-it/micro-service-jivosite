@@ -194,6 +194,7 @@ func (server *Server) start() {
 					return
 				}
 
+				quit <- true
 				server.managers[manager.Id].connection.Close()
 				delete(server.managers, manager.Id)
 
