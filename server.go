@@ -240,6 +240,10 @@ func (server *Server) start() {
 					commandToSend.Jsonrpc = "2.0"
 					manager.connection.WriteJSON(commandToSend)
 
+					logger.WithFields(logrus.Fields{
+						"manager": whatCommand.ManagerId,
+						"command": whatCommand.Params.Name,
+					}).Info("Server send command to socket:")
 				}
 
 				if whatCommand.Params.Name == "agent_message" {
@@ -258,12 +262,13 @@ func (server *Server) start() {
 					commandToSend.Method = "cometan"
 					commandToSend.Jsonrpc = "2.0"
 					manager.connection.WriteJSON(commandToSend)
+
+					logger.WithFields(logrus.Fields{
+						"manager": whatCommand.ManagerId,
+						"command": whatCommand.Params.Name,
+					}).Info("Server send command to socket:")
 				}
 
-				logger.WithFields(logrus.Fields{
-					"manager": whatCommand.ManagerId,
-					"command": whatCommand.Params.Name,
-				}).Info("Server send command to socket:")
 			} else {
 				logger.WithFields(logrus.Fields{
 					"manager": whatCommand.ManagerId,
