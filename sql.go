@@ -31,6 +31,7 @@ func setStatus(id string, status bool) error {
 	}
 
 	stmt.Exec(status, id)
+	stmt.Close()
 
 	return nil
 }
@@ -45,6 +46,7 @@ func selOfflineAll() error {
 	}
 
 	stmt.Exec(false)
+	stmt.Close()
 
 	return nil
 }
