@@ -167,6 +167,7 @@ func (server *Server) start() {
 				manager.SuccessLoginResponse = response
 				server.managers[manager.Id] = manager
 
+				manager.quit = make(chan struct{})
 				manager.connectToSocket()
 				manager.subscribe()
 				manager.auth()
@@ -194,7 +195,11 @@ func (server *Server) start() {
 					return
 				}
 
-				quit <- true
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+				}).Info("Manager quit:")
+
+				close(server.managers[manager.Id].quit)
 				server.managers[manager.Id].connection.Close()
 				delete(server.managers, manager.Id)
 
@@ -217,6 +222,7 @@ func (server *Server) start() {
 				logger.WithFields(logrus.Fields{
 					"manager": whatCommand.ManagerId,
 					"command": whatCommand.Params.Name,
+					"err":     err,
 				}).Error("Server can`t decode command:")
 			}
 
@@ -231,6 +237,7 @@ func (server *Server) start() {
 						logger.WithFields(logrus.Fields{
 							"manager": whatCommand.ManagerId,
 							"command": whatCommand.Params.Name,
+							"err":     err,
 						}).Error("Server can`t decode command:")
 					}
 
@@ -254,6 +261,7 @@ func (server *Server) start() {
 						logger.WithFields(logrus.Fields{
 							"manager": whatCommand.ManagerId,
 							"command": whatCommand.Params.Name,
+							"err":     err,
 						}).Error("Server can`t decode command:")
 					}
 

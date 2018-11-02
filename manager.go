@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-var quit = make(chan bool)
-
 type ResultRequestResult struct {
 }
 
@@ -81,6 +79,7 @@ type Manager struct {
 	SuccessLoginResponse *SuccessLoginResponse
 	connection           *websocket.Conn
 	requests             int
+	quit                 chan struct{}
 }
 
 type ManagerStatus struct {
@@ -205,7 +204,10 @@ func (manager *Manager) connectToSocket() {
 func (manager *Manager) reader(server *Server) {
 	for {
 		select {
-		case <-quit:
+		case <-manager.quit:
+			logger.WithFields(logrus.Fields{
+				"manager": manager.Id,
+			}).Info("Reader quit:")
 			return
 		default:
 			_, message, err := manager.connection.ReadMessage()
@@ -213,7 +215,7 @@ func (manager *Manager) reader(server *Server) {
 			if err != nil {
 				logger.WithFields(logrus.Fields{
 					"error": err,
-				}).Fatal("Socket reader failed:")
+				}).Error("Socket reader failed:")
 			}
 
 			if string(message) != "." {
@@ -240,7 +242,7 @@ func (manager *Manager) reader(server *Server) {
 							"message": serverMessage,
 						}).Error("Login from another dev:")
 
-						quit <- true
+						close(manager.quit)
 
 					} else if serverMessage.Params.Name == "login_ok" {
 						//@todo not nice now
@@ -295,7 +297,8 @@ func (manager *Manager) reader(server *Server) {
 			}
 		}
 	}
-	quit <- true
+
+	close(manager.quit)
 }
 
 func (manager *Manager) ticker() {
@@ -304,7 +307,10 @@ func (manager *Manager) ticker() {
 
 	for {
 		select {
-		case <-done:
+		case <-manager.quit:
+			logger.WithFields(logrus.Fields{
+				"manager": manager.Id,
+			}).Info("Ticker quit:")
 			return
 		case t := <-ticker.C:
 			err := manager.connection.WriteMessage(websocket.TextMessage, []byte("."))
@@ -325,11 +331,12 @@ func (manager *Manager) ticker() {
 				return
 			}
 			select {
-			case <-done:
 			case <-time.After(time.Second):
 			}
 
 			return
 		}
 	}
+
+	close(manager.quit)
 }

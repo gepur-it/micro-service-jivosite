@@ -14,7 +14,6 @@ var AMQPConnection *amqp.Connection
 var AMQPChannel *amqp.Channel
 var logger = logrus.New()
 var interrupt = make(chan *Manager)
-var done chan struct{}
 var MySQL *sql.DB
 
 func failOnError(err error, msg string) {
@@ -86,8 +85,6 @@ func main() {
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
-
-	done = make(chan struct{})
 
 	server := server()
 
