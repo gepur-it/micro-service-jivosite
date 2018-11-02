@@ -280,6 +280,17 @@ func (manager *Manager) reader(server *Server) {
 					"body": resultRequest,
 				}).Info("Send Body:")
 			} else {
+				err = setLastOnline(manager.Id)
+
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"manager": manager.Id,
+						"err":     err,
+					}).Error("Manager can`t update online time:")
+
+					return
+				}
+
 				logger.WithField("manager", manager.Id).Info("Recv pong:")
 			}
 		}

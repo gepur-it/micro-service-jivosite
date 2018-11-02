@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "github.com/go-sql-driver/mysql"
+	"time"
 )
 
 type Credentials struct {
@@ -31,6 +32,23 @@ func setStatus(id string, status bool) error {
 	}
 
 	stmt.Exec(status, id)
+	stmt.Close()
+
+	return nil
+}
+
+func setLastOnline(managerId string) error {
+	var err error
+
+	var updatedAt = time.Now()
+
+	stmt, err := MySQL.Prepare("UPDATE chat_jivosite_manager set online_at=? where id=?")
+
+	if err != nil {
+		return err
+	}
+
+	stmt.Exec(updatedAt, managerId)
 	stmt.Close()
 
 	return nil
