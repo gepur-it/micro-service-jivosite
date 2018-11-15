@@ -219,6 +219,11 @@ func (server *Server) start() {
 		case command := <-server.command:
 			whatCommand := WhatCommand{}
 
+			logger.WithFields(logrus.Fields{
+				"manager": whatCommand.ManagerId,
+				"command": whatCommand.Params.Name,
+			}).Info("Server start work with command:")
+
 			err := json.Unmarshal(command, &whatCommand)
 
 			if err != nil {
