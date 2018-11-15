@@ -59,7 +59,7 @@ func (server *Server) managerQuery() {
 	msgs, err := AMQPChannel.Consume(
 		"erp_chat_manager_status",
 		"",
-		true,
+		false,
 		false,
 		false,
 		false,
@@ -89,6 +89,8 @@ func (server *Server) managerQuery() {
 			} else {
 				server.offline <- manager
 			}
+
+			d.Ack(false)
 		}
 	}()
 
@@ -101,7 +103,7 @@ func (server *Server) commandQuery() {
 	msgs, err := AMQPChannel.Consume(
 		"erp_chat_manager_command",
 		"",
-		true,
+		false,
 		false,
 		false,
 		false,
@@ -114,6 +116,7 @@ func (server *Server) commandQuery() {
 	go func() {
 		for d := range msgs {
 			server.command <- d.Body
+			d.Ack(false)
 		}
 	}()
 
