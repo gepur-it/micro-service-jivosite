@@ -234,6 +234,24 @@ func (manager *Manager) reader(server *Server) {
 				}
 
 				if serverMessage.Method == "handle" {
+					err = AMQPChannel.Publish(
+						"",
+						"chat_to_erp_handle_messages",
+						false,
+						false,
+						amqp.Publishing{
+							DeliveryMode: amqp.Transient,
+							ContentType:  "application/json",
+							Body:         message,
+							Timestamp:    time.Now(),
+						})
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"error": err,
+						}).Error("Failed to declare a queue:")
+					}
+
 					if serverMessage.Params.Name == "login_another_dev" {
 
 						server.offline <- manager
@@ -243,27 +261,6 @@ func (manager *Manager) reader(server *Server) {
 						}).Error("Login from another dev:")
 
 						close(manager.quit)
-
-					} else if serverMessage.Params.Name == "login_ok" {
-						//@todo not nice now
-					} else {
-						err = AMQPChannel.Publish(
-							"",
-							"chat_to_erp_handle_messages",
-							false,
-							false,
-							amqp.Publishing{
-								DeliveryMode: amqp.Transient,
-								ContentType:  "application/json",
-								Body:         message,
-								Timestamp:    time.Now(),
-							})
-
-						if err != nil {
-							logger.WithFields(logrus.Fields{
-								"error": err,
-							}).Error("Failed to declare a queue:")
-						}
 					}
 				}
 

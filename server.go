@@ -1,8 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"github.com/sirupsen/logrus"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"strings"
 )
 
 type WhatCommand struct {
@@ -35,6 +45,52 @@ type AgentMessageCommand struct {
 		PrivateID string `json:"private_id"`
 	} `json:"params"`
 	Jsonrpc string `json:"jsonrpc"`
+}
+
+type AgentImageRequestParamsMedia struct {
+	MimeType string `json:"mime_type"`
+	Type     string `json:"type"`
+	File     string `json:"file"`
+	FileName string `json:"file_name"`
+	FileURL  string `json:"file_url"`
+	FileSize int    `json:"file_size"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Thumb    string `json:"thumb"`
+}
+
+type AgentImageRequestParams struct {
+	Name      string                       `json:"name"`
+	Message   string                       `json:"message"`
+	ChatID    int                          `json:"chat_id"`
+	ClientID  int                          `json:"client_id"`
+	IsQuick   int                          `json:"is_quick"`
+	PrivateID string                       `json:"private_id"`
+	Media     AgentImageRequestParamsMedia `json:"media"`
+}
+
+type AgentImageRequest struct {
+	ID      int                     `json:"id"`
+	Method  string                  `json:"method"`
+	Params  AgentImageRequestParams `json:"params"`
+	Jsonrpc string                  `json:"jsonrpc"`
+}
+
+type AgentImageCommand struct {
+	ManagerID string `json:"managerId"`
+	Params    struct {
+		Name      string `json:"name"`
+		Message   string `json:"message"`
+		ChatID    int    `json:"chat_id"`
+		ClientID  int    `json:"client_id"`
+		IsQuick   int    `json:"is_quick"`
+		PrivateID string `json:"private_id"`
+		Image     struct {
+			Name string `json:"name"`
+			Src  string `json:"src"`
+			Type string `json:"type"`
+		} `json:"image"`
+	} `json:"params"`
 }
 
 type Server struct {
@@ -156,17 +212,6 @@ func (server *Server) start() {
 					return
 				}
 
-				err = setStatus(manager.Id, true)
-
-				if err != nil {
-					logger.WithFields(logrus.Fields{
-						"manager": manager.Id,
-						"err":     err,
-					}).Error("Manager can`t update status:")
-
-					return
-				}
-
 				manager.SuccessLoginResponse = response
 				server.managers[manager.Id] = manager
 
@@ -186,17 +231,6 @@ func (server *Server) start() {
 		case manager := <-server.offline:
 
 			if _, ok := server.managers[manager.Id]; ok {
-
-				err := setStatus(manager.Id, false)
-
-				if err != nil {
-					logger.WithFields(logrus.Fields{
-						"manager": manager.Id,
-						"err":     err,
-					}).Error("Manager can`t update status:")
-
-					return
-				}
 
 				logger.WithFields(logrus.Fields{
 					"manager": manager.Id,
@@ -283,6 +317,185 @@ func (server *Server) start() {
 						"manager": whatCommand.ManagerId,
 						"command": whatCommand.Params.Name,
 					}).Info("Server send command to socket:")
+				}
+
+				if whatCommand.Params.Name == "agent_image" {
+					commandToSend := AgentImageCommand{}
+					err := json.Unmarshal(command, &commandToSend)
+
+					uploadImageEndpoint, err := getUploadImageEndpoint(manager)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+							"err":     err,
+						}).Error("Server can`t get uploadImageEndpoint:")
+
+						return
+					}
+
+					logger.WithFields(logrus.Fields{
+						"data": uploadImageEndpoint,
+					}).Info("Server get uploadImageEndpoint:")
+
+					index := strings.Index(commandToSend.Params.Image.Src, ",")
+					data, err := base64.StdEncoding.DecodeString(commandToSend.Params.Image.Src[index+1:])
+
+					bodyBuf := &bytes.Buffer{}
+					bodyWriter := multipart.NewWriter(bodyBuf)
+
+					acl, err := bodyWriter.CreateFormField("acl")
+					acl.Write([]byte("public-read"))
+
+					ct, err := bodyWriter.CreateFormField("Content-Type")
+					ct.Write([]byte(commandToSend.Params.Image.Type))
+
+					key, err := bodyWriter.CreateFormField("key")
+					key.Write([]byte(uploadImageEndpoint.Key))
+
+					cd, err := bodyWriter.CreateFormField("Content-disposition")
+					cd.Write([]byte("attachment; filename*=UTF-8''27272_3.jpg"))
+
+					xad, err := bodyWriter.CreateFormField("X-Amz-Date")
+					xad.Write([]byte(uploadImageEndpoint.Date))
+
+					policy, err := bodyWriter.CreateFormField("Policy")
+					policy.Write([]byte(uploadImageEndpoint.Policy))
+
+					xac, err := bodyWriter.CreateFormField("X-Amz-Credential")
+					xac.Write([]byte(uploadImageEndpoint.Credential))
+
+					xaa, err := bodyWriter.CreateFormField("X-Amz-Algorithm")
+					xaa.Write([]byte(uploadImageEndpoint.Algorithm))
+
+					xas, err := bodyWriter.CreateFormField("X-Amz-Signature")
+					xas.Write([]byte(uploadImageEndpoint.Signature))
+
+					writer, err := bodyWriter.CreateFormFile("file", commandToSend.Params.Image.Name)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+							"err":     err,
+						}).Error("Can`t create form file:")
+
+						return
+					}
+
+					imageData := bytes.NewReader(data)
+
+					_, err = io.Copy(writer, imageData)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+							"err":     err,
+						}).Error("Can`t copy form file:")
+
+						return
+					}
+
+					bodyWriter.Close()
+
+					println(bodyBuf)
+
+					req, err := http.NewRequest("POST", uploadImageEndpoint.URL, bodyBuf)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+							"err":     err,
+						}).Error("Can`t create send message request:")
+
+						return
+					}
+
+					req.Header.Set("Accept", "*/*")
+					req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+					req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+					req.Header.Set("Connection", "keep-alive")
+					req.Header.Set("Host", "files.jivosite.com")
+					req.Header.Set("Origin", "https://app.jivosite.com")
+					req.Header.Set("Referer", "https://app.jivosite.com")
+					req.Header.Set("Content-Type", bodyWriter.FormDataContentType())
+					req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36")
+
+					resp, err := http.DefaultClient.Do(req)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+							"err":     err,
+						}).Error("Can`t send message request:")
+
+						return
+					}
+
+					resp.Body.Close()
+
+					logger.WithFields(logrus.Fields{
+						"manager":    whatCommand.ManagerId,
+						"command":    whatCommand.Params.Name,
+						"StatusCode": resp.StatusCode,
+						"Status":     resp.Status,
+						"Location":   resp.Header.Get("Location"),
+					}).Info("Upload image to S3:")
+
+					image, _, err := image.Decode(bytes.NewReader(data))
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+							"err":     err,
+						}).Error("Can`t decode image:")
+
+						return
+					}
+
+					manager.requests = manager.requests + 1
+
+					agentImageRequestParamsMedia := AgentImageRequestParamsMedia{
+						MimeType: commandToSend.Params.Image.Type,
+						Type:     "photo",
+						File:     resp.Header.Get("Location"),
+						FileName: commandToSend.Params.Image.Name,
+						FileURL:  resp.Header.Get("Location"),
+						FileSize: len(data),
+						Width:    image.Bounds().Dx(),
+						Height:   image.Bounds().Dy(),
+						Thumb:    resp.Header.Get("Location"),
+					}
+
+					agentImageRequestParams := AgentImageRequestParams{
+						Name:      "agent_message",
+						Message:   commandToSend.Params.Message,
+						ChatID:    commandToSend.Params.ChatID,
+						ClientID:  commandToSend.Params.ClientID,
+						IsQuick:   commandToSend.Params.IsQuick,
+						PrivateID: commandToSend.Params.PrivateID,
+						Media:     agentImageRequestParamsMedia,
+					}
+
+					agentImageRequest := AgentImageRequest{
+						ID:      manager.requests,
+						Params:  agentImageRequestParams,
+						Method:  "cometan",
+						Jsonrpc: "2.0",
+					}
+
+					manager.connection.WriteJSON(agentImageRequest)
+
+					logger.WithFields(logrus.Fields{
+						"manager": whatCommand.ManagerId,
+						"command": whatCommand.Params.Name,
+					}).Info("Server send image message to socket:")
+
 				}
 
 			} else {
