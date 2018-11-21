@@ -86,13 +86,33 @@ type ManagerStatus struct {
 	Status  Status   `json:"status"`
 }
 
-type ServerMessage struct {
+type DetectServerMessage struct {
+	ID      int    `json:"id"`
+	Method  string `json:"method"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
+type SingleServerMessage struct {
 	ID     int    `json:"id"`
 	Method string `json:"method"`
 	Params struct {
 		Name string `json:"name"`
 	} `json:"params"`
 	Jsonrpc string `json:"jsonrpc"`
+}
+
+type BatchServerMessage struct {
+	ID      int             `json:"id"`
+	Method  string          `json:"method"`
+	Params  [][]interface{} `json:"params"`
+	Jsonrpc string          `json:"jsonrpc"`
+}
+
+type DebathServerMessage struct {
+	ID      int           `json:"id"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+	Jsonrpc string        `json:"jsonrpc"`
 }
 
 type ServerMessageLogout struct {
@@ -222,40 +242,85 @@ func (manager *Manager) reader(server *Server) {
 					"message": string(message),
 				}).Info("New message from server:")
 
-				serverMessage := ServerMessage{}
+				detectServerMessage := DetectServerMessage{}
 
-				err = json.Unmarshal(message, &serverMessage)
+				err = json.Unmarshal(message, &detectServerMessage)
 
 				if err != nil {
 					logger.WithFields(logrus.Fields{
 						"error": err,
-					}).Error("Can`t decode response from socket:")
+					}).Error("Can`t decode type response from socket:")
 				}
 
-				if serverMessage.Method == "handle" {
+				if detectServerMessage.Method == "handle" {
+					singleServerMessage := SingleServerMessage{}
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"error": err,
+						}).Error("Can`t decode single response from socket:")
+					}
 
 					err = publishToErp(message)
 
 					if err != nil {
 						logger.WithFields(logrus.Fields{
-							"error": err,
-						}).Error("Failed to declare a queue:")
+							"error":   err,
+							"message": string(message),
+						}).Error("Failed to publish:")
 					}
 
-					if serverMessage.Params.Name == "login_another_dev" {
+					if singleServerMessage.Params.Name == "login_another_dev" {
 
 						server.offline <- manager
 
 						logger.WithFields(logrus.Fields{
-							"message": serverMessage,
+							"message": detectServerMessage,
 						}).Error("Login from another dev:")
 
 						close(manager.quit)
 					}
 				}
 
+				if detectServerMessage.Method == "batch" {
+					batchServerMessage := BatchServerMessage{}
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"error": err,
+						}).Error("Can`t decode batch response from socket:")
+					}
+
+					for _, element := range batchServerMessage.Params {
+						debathServerMessage := DebathServerMessage{
+							ID:      batchServerMessage.ID,
+							Params:  element,
+							Method:  batchServerMessage.Method,
+							Jsonrpc: batchServerMessage.Jsonrpc,
+						}
+
+						message, err := json.Marshal(debathServerMessage)
+
+						if err != nil {
+							logger.WithFields(logrus.Fields{
+								"error": err,
+							}).Error("Can`t encode item of batch message from socket:")
+						}
+
+						err = publishToErp(message)
+
+						if err != nil {
+							logger.WithFields(logrus.Fields{
+								"error":   err,
+								"message": string(message),
+							}).Error("Failed to publish:")
+						}
+					}
+
+				}
+
 				manager.requests = manager.requests + 1
-				resultRequest := ResultRequest{serverMessage.ID, ResultRequestResult{}}
+				resultRequest := ResultRequest{detectServerMessage.ID, ResultRequestResult{}}
 
 				err = manager.connection.WriteJSON(resultRequest)
 

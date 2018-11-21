@@ -210,6 +210,20 @@ func (server *Server) start() {
 				}
 
 				manager.SuccessLoginResponse = response
+
+				response, err = refreshApiKey(manager)
+
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"manager": manager.Id,
+						"err":     err,
+					}).Error("Manager can`t refresh token:")
+
+					return
+				}
+
+				manager.SuccessLoginResponse = response
+
 				server.managers[manager.Id] = manager
 
 				manager.quit = make(chan struct{})
@@ -322,6 +336,19 @@ func (server *Server) start() {
 
 					extension := strings.TrimLeft(filepath.Ext(commandToSend.Params.Image.Name), ".")
 
+					response, err := refreshApiKey(manager)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": manager.Id,
+							"err":     err,
+						}).Error("Manager can`t refresh token:")
+
+						return
+					}
+
+					manager.SuccessLoginResponse = response
+
 					uploadImageEndpoint, err := getUploadImageEndpoint(manager, extension)
 
 					if err != nil {
@@ -420,8 +447,9 @@ func (server *Server) start() {
 
 						if err != nil {
 							logger.WithFields(logrus.Fields{
-								"error": err,
-							}).Error("Failed to declare a queue:")
+								"error":   err,
+								"message": string(message),
+							}).Error("Failed to publish:")
 						}
 
 						manager.connection.WriteJSON(agentImageRequest)

@@ -157,9 +157,6 @@ func getUploadImageEndpoint(manager *Manager, ext string) (*UploadImageEndpoint,
 
 func getApiKey(login *string, pass *string) (*SuccessLoginResponse, error) {
 	var err error
-
-	successLoginResponse := SuccessLoginResponse{}
-
 	loginApiUrl := "https://api.jivosite.com/api/1.0/auth/agent/access"
 	fmt.Println("URL:>", loginApiUrl)
 
@@ -190,6 +187,7 @@ func getApiKey(login *string, pass *string) (*SuccessLoginResponse, error) {
 
 	responseBody, _ := ioutil.ReadAll(resp.Body)
 
+	successLoginResponse := SuccessLoginResponse{}
 	err = json.Unmarshal(responseBody, &successLoginResponse)
 
 	if err != nil {
@@ -201,15 +199,20 @@ func getApiKey(login *string, pass *string) (*SuccessLoginResponse, error) {
 		return nil, err
 	}
 
-	fmt.Println("response Body:", string(responseBody))
+	return &successLoginResponse, err
+
+}
+
+func refreshApiKey(manager *Manager) (*SuccessLoginResponse, error) {
+	var err error
 
 	refreshApiUrl := "https://api.jivosite.com/api/1.0/auth/access/refresh"
 	fmt.Println("URL:>", refreshApiUrl)
 
-	data = url.Values{}
-	data.Set("token", successLoginResponse.AccessToken)
+	data := url.Values{}
+	data.Set("token", manager.SuccessLoginResponse.AccessToken)
 
-	req, err = http.NewRequest("POST", refreshApiUrl, strings.NewReader(data.Encode()))
+	req, err := http.NewRequest("POST", refreshApiUrl, strings.NewReader(data.Encode()))
 
 	if err != nil {
 		return nil, err
@@ -220,8 +223,8 @@ func getApiKey(login *string, pass *string) (*SuccessLoginResponse, error) {
 	req.Header.Set("Referer", "https://app.jivosite.com")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
 
-	client = &http.Client{}
-	resp, err = client.Do(req)
+	client := &http.Client{}
+	resp, err := client.Do(req)
 
 	if err != nil {
 		return nil, err
@@ -229,9 +232,9 @@ func getApiKey(login *string, pass *string) (*SuccessLoginResponse, error) {
 
 	defer resp.Body.Close()
 
-	responseBody, _ = ioutil.ReadAll(resp.Body)
+	responseBody, _ := ioutil.ReadAll(resp.Body)
 
-	successLoginResponse = SuccessLoginResponse{}
+	successLoginResponse := SuccessLoginResponse{}
 
 	err = json.Unmarshal(responseBody, &successLoginResponse)
 
