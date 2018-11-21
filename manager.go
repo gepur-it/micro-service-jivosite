@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
-	"github.com/streadway/amqp"
 	"log"
 	"net/http"
 	"net/url"
@@ -234,17 +233,8 @@ func (manager *Manager) reader(server *Server) {
 				}
 
 				if serverMessage.Method == "handle" {
-					err = AMQPChannel.Publish(
-						"",
-						"chat_to_erp_handle_messages",
-						false,
-						false,
-						amqp.Publishing{
-							DeliveryMode: amqp.Transient,
-							ContentType:  "application/json",
-							Body:         message,
-							Timestamp:    time.Now(),
-						})
+
+					err = publishToErp(message)
 
 					if err != nil {
 						logger.WithFields(logrus.Fields{
