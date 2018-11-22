@@ -2,12 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 	"log"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 )
 
@@ -78,6 +78,7 @@ type Manager struct {
 	SuccessLoginResponse *SuccessLoginResponse
 	connection           *websocket.Conn
 	requests             int
+	mu                   sync.Mutex
 	quit                 chan struct{}
 }
 
@@ -131,10 +132,9 @@ func (manager *Manager) subscribe() {
 	manager.requests = manager.requests + 1
 	socketRegisterRequest := SocketRegisterRequest{manager.requests, "subscribe", socketRegisterRequestParams, "2.0"}
 
-	b, err := json.Marshal(socketRegisterRequest)
-
-	err = manager.connection.WriteJSON(socketRegisterRequest)
-	fmt.Println("\nSend Body:", string(b), "\n")
+	manager.mu.Lock()
+	err := manager.connection.WriteJSON(socketRegisterRequest)
+	manager.mu.Unlock()
 
 	if err != nil {
 		logger.WithFields(logrus.Fields{
@@ -142,6 +142,7 @@ func (manager *Manager) subscribe() {
 			"error":   err,
 		}).Error("Can`t write subscribe request to socket:")
 	}
+
 }
 
 func (manager *Manager) auth() {
@@ -169,10 +170,9 @@ func (manager *Manager) auth() {
 		manager.requests = manager.requests + 1
 		socketAuthRequest := SocketAuthRequest{manager.requests, "cometan", socketAuthRequestParams, "2.0"}
 
-		b, err := json.Marshal(socketAuthRequest)
-
-		err = manager.connection.WriteJSON(socketAuthRequest)
-		fmt.Println("\nSend Body:", string(b), "\n")
+		manager.mu.Lock()
+		err := manager.connection.WriteJSON(socketAuthRequest)
+		manager.mu.Unlock()
 
 		if err != nil {
 			logger.WithFields(logrus.Fields{
@@ -192,10 +192,9 @@ func (manager *Manager) getCannedPhrases() {
 	manager.requests = manager.requests + 1
 	cannedPhrases := CannedPhrases{manager.requests, "cometan", cannedPhrasesParams, "2.0"}
 
-	b, err := json.Marshal(cannedPhrases)
-
-	err = manager.connection.WriteJSON(cannedPhrases)
-	fmt.Println("\nSend Body:", string(b), "\n")
+	manager.mu.Lock()
+	err := manager.connection.WriteJSON(cannedPhrases)
+	manager.mu.Unlock()
 
 	if err != nil {
 		logger.WithFields(logrus.Fields{
@@ -322,7 +321,9 @@ func (manager *Manager) reader(server *Server) {
 				manager.requests = manager.requests + 1
 				resultRequest := ResultRequest{detectServerMessage.ID, ResultRequestResult{}}
 
+				manager.mu.Lock()
 				err = manager.connection.WriteJSON(resultRequest)
+				manager.mu.Unlock()
 
 				if err != nil {
 					logger.WithFields(logrus.Fields{
@@ -365,23 +366,42 @@ func (manager *Manager) ticker() {
 			}).Info("Ticker quit:")
 			return
 		case t := <-ticker.C:
+			manager.mu.Lock()
 			err := manager.connection.WriteMessage(websocket.TextMessage, []byte("."))
-			logger.WithField("manager", manager.Id).Info("Send ping:")
+			manager.mu.Unlock()
 
 			if err != nil {
-				log.Println("write:", err, t)
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+					"err":     err,
+				}).Error("Send ping error:")
 
 				return
 			}
+
+			logger.WithFields(logrus.Fields{
+				"manager": manager.Id,
+				"time":    t,
+			}).Info("Send ping:")
+
 		case <-interrupt:
-			log.Println("interrupt")
-
+			manager.mu.Lock()
 			err := manager.connection.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			manager.mu.Unlock()
+
 			if err != nil {
-				log.Println("write close:", err)
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+					"err":     err,
+				}).Error("Send close socket message error on interrupt:")
 
 				return
 			}
+
+			logger.WithFields(logrus.Fields{
+				"manager": manager.Id,
+			}).Fatal("Interrupt:")
+
 			select {
 			case <-time.After(time.Second):
 			}

@@ -298,7 +298,10 @@ func (server *Server) start() {
 					commandToSend.ID = manager.requests
 					commandToSend.Method = "cometan"
 					commandToSend.Jsonrpc = "2.0"
+
+					manager.mu.Lock()
 					manager.connection.WriteJSON(commandToSend)
+					manager.mu.Unlock()
 
 					logger.WithFields(logrus.Fields{
 						"manager": whatCommand.ManagerId,
@@ -322,7 +325,10 @@ func (server *Server) start() {
 					commandToSend.ID = manager.requests
 					commandToSend.Method = "cometan"
 					commandToSend.Jsonrpc = "2.0"
+
+					manager.mu.Lock()
 					manager.connection.WriteJSON(commandToSend)
+					manager.mu.Unlock()
 
 					logger.WithFields(logrus.Fields{
 						"manager": whatCommand.ManagerId,
@@ -452,7 +458,9 @@ func (server *Server) start() {
 							}).Error("Failed to publish:")
 						}
 
+						manager.mu.Lock()
 						manager.connection.WriteJSON(agentImageRequest)
+						manager.mu.Unlock()
 
 						logger.WithFields(logrus.Fields{
 							"manager": whatCommand.ManagerId,
