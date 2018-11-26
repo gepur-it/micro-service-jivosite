@@ -2,13 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
-	"github.com/streadway/amqp"
 	"log"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 )
 
@@ -79,6 +78,7 @@ type Manager struct {
 	SuccessLoginResponse *SuccessLoginResponse
 	connection           *websocket.Conn
 	requests             int
+	mu                   sync.Mutex
 	quit                 chan struct{}
 }
 
@@ -87,13 +87,33 @@ type ManagerStatus struct {
 	Status  Status   `json:"status"`
 }
 
-type ServerMessage struct {
+type DetectServerMessage struct {
+	ID      int    `json:"id"`
+	Method  string `json:"method"`
+	Jsonrpc string `json:"jsonrpc"`
+}
+
+type SingleServerMessage struct {
 	ID     int    `json:"id"`
 	Method string `json:"method"`
 	Params struct {
 		Name string `json:"name"`
 	} `json:"params"`
 	Jsonrpc string `json:"jsonrpc"`
+}
+
+type BatchServerMessage struct {
+	ID      int             `json:"id"`
+	Method  string          `json:"method"`
+	Params  [][]interface{} `json:"params"`
+	Jsonrpc string          `json:"jsonrpc"`
+}
+
+type DebathServerMessage struct {
+	ID      int           `json:"id"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+	Jsonrpc string        `json:"jsonrpc"`
 }
 
 type ServerMessageLogout struct {
@@ -112,10 +132,9 @@ func (manager *Manager) subscribe() {
 	manager.requests = manager.requests + 1
 	socketRegisterRequest := SocketRegisterRequest{manager.requests, "subscribe", socketRegisterRequestParams, "2.0"}
 
-	b, err := json.Marshal(socketRegisterRequest)
-
-	err = manager.connection.WriteJSON(socketRegisterRequest)
-	fmt.Println("\nSend Body:", string(b), "\n")
+	manager.mu.Lock()
+	err := manager.connection.WriteJSON(socketRegisterRequest)
+	manager.mu.Unlock()
 
 	if err != nil {
 		logger.WithFields(logrus.Fields{
@@ -123,6 +142,7 @@ func (manager *Manager) subscribe() {
 			"error":   err,
 		}).Error("Can`t write subscribe request to socket:")
 	}
+
 }
 
 func (manager *Manager) auth() {
@@ -150,10 +170,9 @@ func (manager *Manager) auth() {
 		manager.requests = manager.requests + 1
 		socketAuthRequest := SocketAuthRequest{manager.requests, "cometan", socketAuthRequestParams, "2.0"}
 
-		b, err := json.Marshal(socketAuthRequest)
-
-		err = manager.connection.WriteJSON(socketAuthRequest)
-		fmt.Println("\nSend Body:", string(b), "\n")
+		manager.mu.Lock()
+		err := manager.connection.WriteJSON(socketAuthRequest)
+		manager.mu.Unlock()
 
 		if err != nil {
 			logger.WithFields(logrus.Fields{
@@ -173,10 +192,9 @@ func (manager *Manager) getCannedPhrases() {
 	manager.requests = manager.requests + 1
 	cannedPhrases := CannedPhrases{manager.requests, "cometan", cannedPhrasesParams, "2.0"}
 
-	b, err := json.Marshal(cannedPhrases)
-
-	err = manager.connection.WriteJSON(cannedPhrases)
-	fmt.Println("\nSend Body:", string(b), "\n")
+	manager.mu.Lock()
+	err := manager.connection.WriteJSON(cannedPhrases)
+	manager.mu.Unlock()
 
 	if err != nil {
 		logger.WithFields(logrus.Fields{
@@ -223,54 +241,89 @@ func (manager *Manager) reader(server *Server) {
 					"message": string(message),
 				}).Info("New message from server:")
 
-				serverMessage := ServerMessage{}
+				detectServerMessage := DetectServerMessage{}
 
-				err = json.Unmarshal(message, &serverMessage)
+				err = json.Unmarshal(message, &detectServerMessage)
 
 				if err != nil {
 					logger.WithFields(logrus.Fields{
 						"error": err,
-					}).Error("Can`t decode response from socket:")
+					}).Error("Can`t decode type response from socket:")
 				}
 
-				if serverMessage.Method == "handle" {
-					if serverMessage.Params.Name == "login_another_dev" {
+				if detectServerMessage.Method == "handle" {
+					singleServerMessage := SingleServerMessage{}
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"error": err,
+						}).Error("Can`t decode single response from socket:")
+					}
+
+					err = publishToErp(message)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"error":   err,
+							"message": string(message),
+						}).Error("Failed to publish:")
+					}
+
+					if singleServerMessage.Params.Name == "login_another_dev" {
 
 						server.offline <- manager
 
 						logger.WithFields(logrus.Fields{
-							"message": serverMessage,
+							"message": detectServerMessage,
 						}).Error("Login from another dev:")
 
 						close(manager.quit)
+					}
+				}
 
-					} else if serverMessage.Params.Name == "login_ok" {
-						//@todo not nice now
-					} else {
-						err = AMQPChannel.Publish(
-							"",
-							"chat_to_erp_handle_messages",
-							false,
-							false,
-							amqp.Publishing{
-								DeliveryMode: amqp.Transient,
-								ContentType:  "application/json",
-								Body:         message,
-								Timestamp:    time.Now(),
-							})
+				if detectServerMessage.Method == "batch" {
+					batchServerMessage := BatchServerMessage{}
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"error": err,
+						}).Error("Can`t decode batch response from socket:")
+					}
+
+					for _, element := range batchServerMessage.Params {
+						debathServerMessage := DebathServerMessage{
+							ID:      batchServerMessage.ID,
+							Params:  element,
+							Method:  batchServerMessage.Method,
+							Jsonrpc: batchServerMessage.Jsonrpc,
+						}
+
+						message, err := json.Marshal(debathServerMessage)
 
 						if err != nil {
 							logger.WithFields(logrus.Fields{
 								"error": err,
-							}).Error("Failed to declare a queue:")
+							}).Error("Can`t encode item of batch message from socket:")
+						}
+
+						err = publishToErp(message)
+
+						if err != nil {
+							logger.WithFields(logrus.Fields{
+								"error":   err,
+								"message": string(message),
+							}).Error("Failed to publish:")
 						}
 					}
+
 				}
 
 				manager.requests = manager.requests + 1
-				resultRequest := ResultRequest{serverMessage.ID, ResultRequestResult{}}
+				resultRequest := ResultRequest{detectServerMessage.ID, ResultRequestResult{}}
 
+				manager.mu.Lock()
 				err = manager.connection.WriteJSON(resultRequest)
+				manager.mu.Unlock()
 
 				if err != nil {
 					logger.WithFields(logrus.Fields{
@@ -313,23 +366,42 @@ func (manager *Manager) ticker() {
 			}).Info("Ticker quit:")
 			return
 		case t := <-ticker.C:
+			manager.mu.Lock()
 			err := manager.connection.WriteMessage(websocket.TextMessage, []byte("."))
-			logger.WithField("manager", manager.Id).Info("Send ping:")
+			manager.mu.Unlock()
 
 			if err != nil {
-				log.Println("write:", err, t)
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+					"err":     err,
+				}).Error("Send ping error:")
 
 				return
 			}
+
+			logger.WithFields(logrus.Fields{
+				"manager": manager.Id,
+				"time":    t,
+			}).Info("Send ping:")
+
 		case <-interrupt:
-			log.Println("interrupt")
-
+			manager.mu.Lock()
 			err := manager.connection.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			manager.mu.Unlock()
+
 			if err != nil {
-				log.Println("write close:", err)
+				logger.WithFields(logrus.Fields{
+					"manager": manager.Id,
+					"err":     err,
+				}).Error("Send close socket message error on interrupt:")
 
 				return
 			}
+
+			logger.WithFields(logrus.Fields{
+				"manager": manager.Id,
+			}).Fatal("Interrupt:")
+
 			select {
 			case <-time.After(time.Second):
 			}

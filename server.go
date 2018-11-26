@@ -1,8 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"github.com/sirupsen/logrus"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"path/filepath"
+	"strings"
 )
 
 type WhatCommand struct {
@@ -35,6 +42,52 @@ type AgentMessageCommand struct {
 		PrivateID string `json:"private_id"`
 	} `json:"params"`
 	Jsonrpc string `json:"jsonrpc"`
+}
+
+type AgentImageRequestParamsMedia struct {
+	MimeType string  `json:"mime_type"`
+	Type     string  `json:"type"`
+	File     *string `json:"file"`
+	FileName string  `json:"file_name"`
+	FileURL  *string `json:"file_url"`
+	FileSize int     `json:"file_size"`
+	Width    int     `json:"width"`
+	Height   int     `json:"height"`
+	Thumb    *string `json:"thumb"`
+}
+
+type AgentImageRequestParams struct {
+	Name      string                       `json:"name"`
+	Message   string                       `json:"message"`
+	ChatID    int                          `json:"chat_id"`
+	ClientID  int                          `json:"client_id"`
+	IsQuick   int                          `json:"is_quick"`
+	PrivateID string                       `json:"private_id"`
+	Media     AgentImageRequestParamsMedia `json:"media"`
+}
+
+type AgentImageRequest struct {
+	ID      int                     `json:"id"`
+	Method  string                  `json:"method"`
+	Params  AgentImageRequestParams `json:"params"`
+	Jsonrpc string                  `json:"jsonrpc"`
+}
+
+type AgentImageCommand struct {
+	ManagerID string `json:"managerId"`
+	Params    struct {
+		Name      string `json:"name"`
+		Message   string `json:"message"`
+		ChatID    int    `json:"chat_id"`
+		ClientID  int    `json:"client_id"`
+		IsQuick   int    `json:"is_quick"`
+		PrivateID string `json:"private_id"`
+		Image     struct {
+			Name string `json:"name"`
+			Src  string `json:"src"`
+			Type string `json:"type"`
+		} `json:"image"`
+	} `json:"params"`
 }
 
 type Server struct {
@@ -156,18 +209,21 @@ func (server *Server) start() {
 					return
 				}
 
-				err = setStatus(manager.Id, true)
+				manager.SuccessLoginResponse = response
+
+				response, err = refreshApiKey(manager)
 
 				if err != nil {
 					logger.WithFields(logrus.Fields{
 						"manager": manager.Id,
 						"err":     err,
-					}).Error("Manager can`t update status:")
+					}).Error("Manager can`t refresh token:")
 
 					return
 				}
 
 				manager.SuccessLoginResponse = response
+
 				server.managers[manager.Id] = manager
 
 				manager.quit = make(chan struct{})
@@ -186,17 +242,6 @@ func (server *Server) start() {
 		case manager := <-server.offline:
 
 			if _, ok := server.managers[manager.Id]; ok {
-
-				err := setStatus(manager.Id, false)
-
-				if err != nil {
-					logger.WithFields(logrus.Fields{
-						"manager": manager.Id,
-						"err":     err,
-					}).Error("Manager can`t update status:")
-
-					return
-				}
 
 				logger.WithFields(logrus.Fields{
 					"manager": manager.Id,
@@ -253,7 +298,10 @@ func (server *Server) start() {
 					commandToSend.ID = manager.requests
 					commandToSend.Method = "cometan"
 					commandToSend.Jsonrpc = "2.0"
+
+					manager.mu.Lock()
 					manager.connection.WriteJSON(commandToSend)
+					manager.mu.Unlock()
 
 					logger.WithFields(logrus.Fields{
 						"manager": whatCommand.ManagerId,
@@ -277,12 +325,148 @@ func (server *Server) start() {
 					commandToSend.ID = manager.requests
 					commandToSend.Method = "cometan"
 					commandToSend.Jsonrpc = "2.0"
+
+					manager.mu.Lock()
 					manager.connection.WriteJSON(commandToSend)
+					manager.mu.Unlock()
 
 					logger.WithFields(logrus.Fields{
 						"manager": whatCommand.ManagerId,
 						"command": whatCommand.Params.Name,
 					}).Info("Server send command to socket:")
+				}
+
+				if whatCommand.Params.Name == "agent_image" {
+					commandToSend := AgentImageCommand{}
+					err := json.Unmarshal(command, &commandToSend)
+
+					extension := strings.TrimLeft(filepath.Ext(commandToSend.Params.Image.Name), ".")
+
+					response, err := refreshApiKey(manager)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": manager.Id,
+							"err":     err,
+						}).Error("Manager can`t refresh token:")
+
+						return
+					}
+
+					manager.SuccessLoginResponse = response
+
+					uploadImageEndpoint, err := getUploadImageEndpoint(manager, extension)
+
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+							"err":     err,
+						}).Error("Server can`t get uploadImageEndpoint:")
+					}
+
+					if uploadImageEndpoint != nil {
+						logger.WithFields(logrus.Fields{
+							"data": uploadImageEndpoint,
+						}).Info("Server get uploadImageEndpoint:")
+
+						index := strings.Index(commandToSend.Params.Image.Src, ",")
+						data, err := base64.StdEncoding.DecodeString(commandToSend.Params.Image.Src[index+1:])
+
+						if err != nil {
+							logger.WithFields(logrus.Fields{
+								"manager": whatCommand.ManagerId,
+								"command": whatCommand.Params.Name,
+								"err":     err,
+							}).Error("Can`t decode base64 file:")
+						}
+
+						location, err := uploadImageToEndpoint(commandToSend, uploadImageEndpoint, data)
+
+						if err != nil {
+							logger.WithFields(logrus.Fields{
+								"manager": whatCommand.ManagerId,
+								"command": whatCommand.Params.Name,
+								"err":     err,
+							}).Error("Can`t get file location:")
+						}
+
+						logger.WithFields(logrus.Fields{
+							"location": location,
+						}).Info("Upload file to S3:")
+
+						manager.requests = manager.requests + 1
+
+						var fileType = "document"
+
+						if commandToSend.Params.Image.Type == "image/jpeg" || commandToSend.Params.Image.Type == "image/png" {
+							fileType = "photo"
+						}
+
+						agentImageRequestParamsMedia := AgentImageRequestParamsMedia{
+							MimeType: commandToSend.Params.Image.Type,
+							Type:     fileType,
+							File:     location,
+							FileName: commandToSend.Params.Image.Name,
+							FileURL:  location,
+							FileSize: len(data),
+						}
+
+						if commandToSend.Params.Image.Type == "image/jpeg" || commandToSend.Params.Image.Type == "image/png" {
+							img, _, err := image.Decode(bytes.NewReader(data))
+
+							if err != nil {
+								logger.WithFields(logrus.Fields{
+									"manager": whatCommand.ManagerId,
+									"command": whatCommand.Params.Name,
+									"err":     err,
+								}).Error("Can`t decode image:")
+							}
+
+							agentImageRequestParamsMedia.Width = img.Bounds().Dx()
+							agentImageRequestParamsMedia.Height = img.Bounds().Dy()
+							agentImageRequestParamsMedia.Thumb = location
+						} else {
+							agentImageRequestParamsMedia.Thumb = nil
+						}
+
+						agentImageRequestParams := AgentImageRequestParams{
+							Name:      "agent_message",
+							Message:   commandToSend.Params.Message,
+							ChatID:    commandToSend.Params.ChatID,
+							ClientID:  commandToSend.Params.ClientID,
+							IsQuick:   commandToSend.Params.IsQuick,
+							PrivateID: commandToSend.Params.PrivateID,
+							Media:     agentImageRequestParamsMedia,
+						}
+
+						agentImageRequest := AgentImageRequest{
+							ID:      manager.requests,
+							Params:  agentImageRequestParams,
+							Method:  "cometan",
+							Jsonrpc: "2.0",
+						}
+
+						message, err := json.Marshal(agentImageRequest)
+
+						err = publishToErp(message)
+
+						if err != nil {
+							logger.WithFields(logrus.Fields{
+								"error":   err,
+								"message": string(message),
+							}).Error("Failed to publish:")
+						}
+
+						manager.mu.Lock()
+						manager.connection.WriteJSON(agentImageRequest)
+						manager.mu.Unlock()
+
+						logger.WithFields(logrus.Fields{
+							"manager": whatCommand.ManagerId,
+							"command": whatCommand.Params.Name,
+						}).Info("Server send image message to socket:")
+					}
 				}
 
 			} else {
